@@ -258,7 +258,7 @@ export class ProductService {
         return null; // or throw new Error('No image file provided');
       }
 
-      let domain = 'localhost:4000'; // Default domain for development
+      let domain = 'http://localhost:4000'; // Default domain for development
 
       // Check if the environment is production
       if (process.env.NODE_ENV === 'production') {
@@ -282,7 +282,7 @@ export class ProductService {
       });
 
       // Return the absolute URL of the saved image
-      return `http://${domain}/${imageFile.originalname}`;
+      return `${domain}/${imageFile.originalname}`;
     } catch (error) {
       console.error('Error saving image:', error);
       throw new Error('Failed to save image');
