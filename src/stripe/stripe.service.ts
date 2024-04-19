@@ -71,8 +71,7 @@ export class StripeService {
         userId,
       },
       mode: 'payment',
-      success_url:
-        'https://e-commerce-frontend-type-script-nextjs-1ql5.vercel.app/success',
+      success_url: 'http://localhost:3000/success',
       cancel_url: 'http://localhost:3000/api/checkout/cancel',
       client_reference_id: userId.toString(),
       billing_address_collection: 'required', // Require the customer to enter their shipping address
