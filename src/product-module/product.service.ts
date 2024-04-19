@@ -263,7 +263,7 @@ export class ProductService {
       // Check if the environment is production
       if (process.env.NODE_ENV === 'production') {
         // Set the production domain based on your actual production domain
-        domain = 'your-production-domain.com';
+        domain = 'https://e-commerce-backend-nestjs-postgres.onrender.com';
       }
 
       const uploadDir = join(process.cwd(), 'src', 'uploads');
