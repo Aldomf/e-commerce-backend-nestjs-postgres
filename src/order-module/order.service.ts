@@ -43,6 +43,13 @@ export class OrderService {
     await this.orderRepository.softDelete(id);
   }
 
+  async findOneById(id: number): Promise<Order> {
+    return this.orderRepository.findOne({
+      where: { id },
+      relations: ['products', 'user', 'user.shippingAddress'],
+    });
+  }
+
   async updateOrderStatus(
     userId: number,
     id: number,
@@ -53,7 +60,33 @@ export class OrderService {
       if (!order) {
         throw new Error('Order not found');
       }
-      order.orderStatus = Status.Shipped;
+      order.orderStatus = Status.Delivered;
+      return this.orderRepository.save(order);
+    } catch (error) {
+      console.error('Error updating order status:', error.message);
+      return { error: error.message }; // Return error message in response
+    }
+  }
+
+  async updateOrderStatusAdmin(
+    id: number,
+    newStatus: Status,
+  ): Promise<Order | { error: string }> {
+    try {
+      const order = await this.findOneById(id);
+      if (!order) {
+        throw new Error('Order not found');
+      }
+
+      // Check if the new status is a valid status from the enum
+      if (!(newStatus in Status)) {
+        throw new Error('Invalid status');
+      }
+
+      // Update the order status to the new status
+      order.orderStatus = newStatus;
+
+      // Save the updated order
       return this.orderRepository.save(order);
     } catch (error) {
       console.error('Error updating order status:', error.message);

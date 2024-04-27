@@ -21,6 +21,7 @@ import { AuthGuard } from 'src/auth-module/guard/auth.guard';
 import { AdminGuard } from 'src/common/guards/admin.guard';
 import { UserIdGuard } from 'src/common/guards/userId.guard';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Status } from 'src/common/enums/status.enum';
 
 @ApiTags('orders')
 @Controller('orders')
@@ -63,6 +64,28 @@ export class OrderController {
     @Param('id') id: string,
   ): Promise<Order> {
     const result = await this.orderService.updateOrderStatus(+userId, +id);
+    if ('error' in result) {
+      // If error object is returned, throw an HttpException with the error message
+      throw new HttpException(result.error, HttpStatus.BAD_REQUEST);
+    }
+    // If an Order object is returned, return it
+    return result;
+  }
+
+  @Patch(':id/status')
+  @UseGuards(AdminGuard)
+  @ApiOperation({ summary: 'Admin access required for this endpoint' })
+  async updateOrderStatusAdmin(
+    @Param('id') id: string,
+    @Body() body: { newStatus: Status }, // Expecting new status from the request body
+  ): Promise<Order> {
+    const { newStatus } = body;
+
+    const result = await this.orderService.updateOrderStatusAdmin(
+      +id,
+      newStatus,
+    );
+
     if ('error' in result) {
       // If error object is returned, throw an HttpException with the error message
       throw new HttpException(result.error, HttpStatus.BAD_REQUEST);
