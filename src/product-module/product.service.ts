@@ -9,9 +9,25 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Product } from './entities/product.entity';
 import { Not, Repository } from 'typeorm';
 import { CategoryService } from 'src/category/category.service';
-import { join } from 'path';
-import { createWriteStream, existsSync, mkdirSync } from 'fs';
+//import { join } from 'path';
+//import { createWriteStream, existsSync, mkdirSync } from 'fs';
 import { Order } from 'src/order-module/entities/order.entity';
+import { v2 as cloudinary } from 'cloudinary';
+//import { Stream, Readable } from 'stream';
+import * as fs from 'fs';
+import * as util from 'util';
+import { config } from 'dotenv';
+config();
+
+// Configure Cloudinary with your Cloudinary credentials
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+const writeFileAsync = util.promisify(fs.writeFile);
+const unlinkAsync = util.promisify(fs.unlink);
 
 @Injectable()
 export class ProductService {
@@ -36,6 +52,10 @@ export class ProductService {
         'Product with the same name already exists',
       );
     }
+
+    console.log('Cloudinary Cloud Name:', process.env.CLOUDINARY_CLOUD_NAME);
+    console.log('Cloudinary API Key:', process.env.CLOUDINARY_API_KEY);
+    console.log('Cloudinary API Secret:', process.env.CLOUDINARY_API_SECRET);
 
     // Check if the provided category exists in the database
     const category = await this.categoryService.findOneByName(
@@ -205,8 +225,17 @@ export class ProductService {
     // Logging calculated priceWithDiscount
     console.log('Price With Discount:', priceWithDiscount);
 
-    // Save the image to the server
-    const imageUrl = await this.saveImage(imageFile);
+    // Check if a new image is provided
+    let imageUrl: string | null = null;
+    if (imageFile) {
+      // Save the new image to Cloudinary
+      imageUrl = await this.saveImage(imageFile);
+
+      // Delete the old image from Cloudinary
+      if (existingProduct.imageUrl) {
+        await this.deleteImageFromCloudinary(existingProduct.imageUrl);
+      }
+    }
 
     // Update product properties
     existingProduct.name = updateProductDto.name;
@@ -231,25 +260,70 @@ export class ProductService {
   }
 
   async remove(id: number) {
-    const foundProduct = await this.productRepository.findOne({
+    // Find the product to delete
+    const productToDelete = await this.productRepository.findOne({
       where: { id },
-      relations: ['orders'], // Assuming 'orders' is the relationship name between Product and OrderProduct
     });
 
-    if (!foundProduct) {
+    if (!productToDelete) {
       throw new NotFoundException('Product not found');
     }
 
-    // Delete associated records in the 'order_product' table
-    if (foundProduct.orders && foundProduct.orders.length > 0) {
-      for (const order of foundProduct.orders) {
-        await this.orderRepository.delete(order.id);
+    // Extract the public ID from the Cloudinary URL
+    const publicId = this.extractPublicIdFromImageUrl(productToDelete.imageUrl);
+
+    try {
+      // Delete the image from Cloudinary using its public ID
+      if (publicId) {
+        await cloudinary.uploader.destroy(publicId);
+        console.log(`Image deleted from Cloudinary. Public ID: ${publicId}`);
       }
+    } catch (error) {
+      console.error('Error deleting image from Cloudinary:', error);
+      // Handle error if needed
     }
 
-    // Now delete the product itself
+    // Delete the product itself
     return await this.productRepository.delete(id);
   }
+
+  // async saveImage(imageFile?: Express.Multer.File): Promise<string> {
+  //   try {
+  //     if (!imageFile) {
+  //       // If no image file is provided, return null or throw an error as per your requirement
+  //       return null; // or throw new Error('No image file provided');
+  //     }
+
+  //     let domain = 'http://localhost:4000'; // Default domain for development
+
+  //     // Check if the environment is production
+  //     if (process.env.NODE_ENV === 'production') {
+  //       // Set the production domain based on your actual production domain
+  //       domain = 'https://e-commerce-backend-nestjs-postgres.onrender.com';
+  //     }
+
+  //     const uploadDir = join(process.cwd(), 'src', 'uploads');
+  //     const uploadPath = join(uploadDir, imageFile.originalname);
+
+  //     // Ensure that the uploads directory exists
+  //     if (!existsSync(uploadDir)) {
+  //       mkdirSync(uploadDir, { recursive: true });
+  //     }
+
+  //     const writeStream = createWriteStream(uploadPath);
+  //     await new Promise<void>((resolve, reject) => {
+  //       writeStream.write(imageFile.buffer);
+  //       writeStream.end(resolve); // Call end without any arguments
+  //       writeStream.on('error', reject);
+  //     });
+
+  //     // Return the absolute URL of the saved image
+  //     return `${domain}/${imageFile.originalname}`;
+  //   } catch (error) {
+  //     console.error('Error saving image:', error);
+  //     throw new Error('Failed to save image');
+  //   }
+  // }
 
   async saveImage(imageFile?: Express.Multer.File): Promise<string> {
     try {
@@ -258,34 +332,52 @@ export class ProductService {
         return null; // or throw new Error('No image file provided');
       }
 
-      let domain = 'http://localhost:4000'; // Default domain for development
+      // Create a temporary file from the buffer
+      const tempFilePath = `temp-${Date.now()}.${imageFile.originalname.split('.').pop()}`;
+      await writeFileAsync(tempFilePath, imageFile.buffer);
 
-      // Check if the environment is production
-      if (process.env.NODE_ENV === 'production') {
-        // Set the production domain based on your actual production domain
-        domain = 'https://e-commerce-backend-nestjs-postgres.onrender.com';
-      }
-
-      const uploadDir = join(process.cwd(), 'src', 'uploads');
-      const uploadPath = join(uploadDir, imageFile.originalname);
-
-      // Ensure that the uploads directory exists
-      if (!existsSync(uploadDir)) {
-        mkdirSync(uploadDir, { recursive: true });
-      }
-
-      const writeStream = createWriteStream(uploadPath);
-      await new Promise<void>((resolve, reject) => {
-        writeStream.write(imageFile.buffer);
-        writeStream.end(resolve); // Call end without any arguments
-        writeStream.on('error', reject);
+      // Upload the temporary file to Cloudinary
+      const result = await cloudinary.uploader.upload(tempFilePath, {
+        folder: 'e-commerce-shipshop', // Optional: Specify a folder in Cloudinary to organize your images
       });
 
-      // Return the absolute URL of the saved image
-      return `${domain}/${imageFile.originalname}`;
+      // Delete the temporary file
+      await unlinkAsync(tempFilePath);
+
+      // Return the URL of the uploaded image
+      return result.secure_url;
     } catch (error) {
-      console.error('Error saving image:', error);
+      console.error('Error saving image to Cloudinary:', error);
       throw new Error('Failed to save image');
+    }
+  }
+
+  // Method to delete image from Cloudinary
+  async deleteImageFromCloudinary(imageUrl: string): Promise<void> {
+    try {
+      // Extract the public ID of the image from the Cloudinary URL
+      const publicId = this.extractPublicIdFromImageUrl(imageUrl);
+
+      if (publicId) {
+        // Delete the image from Cloudinary using its public ID
+        await cloudinary.uploader.destroy(publicId);
+        console.log(`Image deleted from Cloudinary. Public ID: ${publicId}`);
+      }
+    } catch (error) {
+      console.error('Error deleting image from Cloudinary:', error);
+      throw new Error('Failed to delete image from Cloudinary');
+    }
+  }
+
+  // Helper method to extract public ID from Cloudinary image URL along with the folder name
+  extractPublicIdFromImageUrl(imageUrl: string): string | null {
+    try {
+      // Split the URL by '/' and get the last part (public ID)
+      const parts = imageUrl.split('/');
+      return `e-commerce-shipshop/${parts.pop()?.split('.')[0] || null}`;
+    } catch (error) {
+      console.error('Error extracting public ID from image URL:', error);
+      return null;
     }
   }
 }
