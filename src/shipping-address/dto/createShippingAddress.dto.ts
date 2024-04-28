@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsPhoneNumber } from 'class-validator';
+import { IsString, IsNotEmpty, IsMobilePhone } from 'class-validator';
 
 export class CreateShippingAddressDto {
   @IsNotEmpty()
@@ -22,6 +22,6 @@ export class CreateShippingAddressDto {
   readonly postalCode: string;
 
   @IsNotEmpty()
-  @IsPhoneNumber()
+  @IsMobilePhone()
   readonly mobile: string;
 }
