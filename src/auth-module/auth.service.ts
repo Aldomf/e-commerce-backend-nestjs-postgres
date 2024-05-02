@@ -9,12 +9,15 @@ import * as bcrypt from 'bcryptjs';
 import { LoginDto } from './dto/login.dto';
 import { JwtService } from '@nestjs/jwt';
 import { User } from './interfaces/userInterface';
+import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ResendEmailService } from 'src/resend-email/resend-email.service';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly userService: UserService,
     private readonly jwtService: JwtService,
+    private readonly resendEmailService: ResendEmailService,
   ) {}
 
   //Signup
@@ -64,5 +67,57 @@ export class AuthService {
       role: user.role,
     }; // Customize payload as per your needs
     return await this.jwtService.signAsync(payload); // Sign the payload to generate JWT token
+  }
+
+  // Forgot Password
+  async forgotPassword(email: string): Promise<void> {
+    const user = await this.userService.findUserByEmail(email);
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    // Generate and store reset token
+    const resetToken = await this.generateResetToken(user.id.toString());
+
+    // Send reset password email with reset token using the email service
+    await this.resendEmailService.sendPasswordResetEmail(email, resetToken);
+  }
+
+  // Reset Password
+  async resetPassword(resetPasswordDto: ResetPasswordDto): Promise<void> {
+    // Decode and verify reset token
+    const decoded = await this.verifyResetToken(resetPasswordDto.token);
+
+    // Find user by id
+    const user = await this.userService.findOne(decoded.sub);
+
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    // Hash the new password
+    const hashedPassword = await bcrypt.hash(resetPasswordDto.newPassword, 10);
+
+    // Update user's password
+    user.password = hashedPassword;
+    await this.userService.update(user);
+  }
+
+  // Generate reset token
+  private async generateResetToken(userId: string): Promise<string> {
+    const payload = {
+      sub: userId,
+    };
+    return await this.jwtService.signAsync(payload, { expiresIn: '1h' }); // Token expires in 1 hour
+  }
+
+  // Verify reset token
+  private async verifyResetToken(token: string): Promise<any> {
+    try {
+      const decoded = await this.jwtService.verifyAsync(token);
+      return decoded;
+    } catch (error) {
+      throw new BadRequestException('Invalid or expired token');
+    }
   }
 }

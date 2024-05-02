@@ -6,6 +6,7 @@ import { JwtModule } from '@nestjs/jwt';
 //import { jwtConstants } from './constants/constants';
 import { AuthGuard } from './guard/auth.guard';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ResendEmailService } from 'src/resend-email/resend-email.service';
 
 @Module({
   imports: [
@@ -26,7 +27,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
     // }),
   ],
   controllers: [AuthModuleController],
-  providers: [AuthService, AuthGuard],
+  providers: [AuthService, AuthGuard, ResendEmailService],
   exports: [AuthGuard, AuthService, JwtModule],
 })
 export class AuthModule {}

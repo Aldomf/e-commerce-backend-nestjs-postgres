@@ -40,4 +40,8 @@ export class UserService {
     }
     return foundUser;
   }
+
+  async update(user: User) {
+    return await this.userRepository.save(user);
+  }
 }
