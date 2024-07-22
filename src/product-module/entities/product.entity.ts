@@ -41,8 +41,8 @@ export class Product {
   @Column({ default: false, nullable: true })
   new: boolean;
 
-  @Column()
-  imageUrl: string;
+  @Column({ type: 'simple-array' })
+  imageUrls: string[];
 
   @Column({ nullable: true }) // Nullable because not all products have discounts
   @IsNumber()

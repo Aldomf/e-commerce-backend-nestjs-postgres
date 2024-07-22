@@ -61,7 +61,7 @@ export class StripeService {
           product_data: {
             name: item.name,
             description: item.description,
-            images: [item.imageUrl],
+            images: [item.imageUrls[0]],
           },
           unit_amount: parseFloat((item.price * 100).toFixed(2)),
         },
@@ -82,7 +82,7 @@ export class StripeService {
       },
     });
     // Log the image URL in the console
-    console.log('Image URL:', items[0].imageUrl);
+    console.log('Image URL:', items[0].imageUrls);
 
     return session;
   }

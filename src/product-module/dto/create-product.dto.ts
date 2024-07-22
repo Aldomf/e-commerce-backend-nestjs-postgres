@@ -1,4 +1,5 @@
 import {
+  IsArray,
   //IsBoolean,
   IsNotEmpty,
   IsNumberString,
@@ -53,9 +54,9 @@ export class CreateProductDto {
   @IsOptional()
   readonly discountPercentage?: number;
 
-  @IsString()
+  @IsArray()
   @IsOptional()
-  readonly imageUrl?: string;
+  readonly imageUrls?: string[];
 
   //@IsBoolean()
   @IsOptional()

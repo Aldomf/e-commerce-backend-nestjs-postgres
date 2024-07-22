@@ -41,7 +41,7 @@ export class ProductService {
 
   async create(
     createProductDto: CreateProductDto,
-    imageFile: Express.Multer.File,
+    imageFiles: Express.Multer.File[],
   ): Promise<Product> {
     // Check if the product with the same name already exists
     const foundProduct = await this.productRepository.findOne({
@@ -108,7 +108,7 @@ export class ProductService {
     console.log('Price With Discount:', priceWithDiscount);
 
     // Save the image to the server
-    const imageUrl = await this.saveImage(imageFile);
+    const imageUrls = await this.saveImages(imageFiles);
 
     // Create and save the new product with the assigned image URL
     const createdProduct = this.productRepository.create({
@@ -120,7 +120,7 @@ export class ProductService {
       new: newProduct,
       inStock,
       hot,
-      imageUrl, // Assign the image URL to the product
+      imageUrls,
     });
 
     // Logging the created product
@@ -147,7 +147,7 @@ export class ProductService {
   async update(
     id: number,
     updateProductDto: UpdateProductDto,
-    imageFile?: Express.Multer.File,
+    imageFiles: Express.Multer.File[],
   ): Promise<Product> {
     // Find the product to update
     const existingProduct = await this.productRepository.findOne({
@@ -167,7 +167,6 @@ export class ProductService {
       },
     });
 
-    // If the found product has a different ID than the current product, it means there's another product with the same name
     if (foundProduct && foundProduct.id !== id) {
       throw new BadRequestException(
         'Product with the same name already exists',
@@ -178,13 +177,11 @@ export class ProductService {
     const category = await this.categoryService.findOneByName(
       updateProductDto.category,
     );
-    console.log(category);
     if (!category) {
       throw new BadRequestException('Category does not exist');
     }
 
-    // Logging discountPercentage, discountActive, and price before calculation
-    console.log('Discount Percentage:', updateProductDto.discountPercentage);
+    // Convert string booleans to actual booleans if necessary
     const discountActive =
       typeof updateProductDto.discountActive === 'boolean'
         ? updateProductDto.discountActive
@@ -210,32 +207,41 @@ export class ProductService {
         ? updateProductDto.hot
         : updateProductDto.hot === 'true';
 
-    console.log('Discount Active:', discountActive);
-    console.log('Discount Active Type:', typeof discountActive);
-    console.log('Original Price:', updateProductDto.price);
-    console.log('Original Price Type:', typeof updateProductDto.price);
-
-    // Calculate priceWithDiscount if a discount is applicable and discount is active
-    let priceWithDiscount: number = updateProductDto.price; // By default, set it to the original price
+    // Calculate price with discount
+    let priceWithDiscount: number = updateProductDto.price; // Default to original price
     if (updateProductDto.discountPercentage > 0 && discountActive) {
       const discount = updateProductDto.discountPercentage / 100;
       priceWithDiscount = +(updateProductDto.price * (1 - discount)).toFixed(2);
     }
 
-    // Logging calculated priceWithDiscount
-    console.log('Price With Discount:', priceWithDiscount);
+    // Initialize the updated image URLs with the existing ones
+    let updatedImageUrls: string[] = existingProduct.imageUrls.slice();
 
-    // Check if a new image is provided
-    let imageUrl: string | null = null;
-    if (imageFile) {
-      // Save the new image to Cloudinary
-      imageUrl = await this.saveImage(imageFile);
+    // If there are indices of images to delete, remove those images from Cloudinary and update the image URLs
+    if (
+      updateProductDto.imageIndicesToDelete &&
+      updateProductDto.imageIndicesToDelete.length > 0
+    ) {
+      const imagesToDelete = updateProductDto.imageIndicesToDelete.map(
+        (index) => existingProduct.imageUrls[index],
+      );
 
-      // Delete the old image from Cloudinary
-      if (existingProduct.imageUrl) {
-        await this.deleteImageFromCloudinary(existingProduct.imageUrl);
-      }
+      // Filter out the images to delete from the existing image URLs
+      updatedImageUrls = updatedImageUrls.filter(
+        (url) => !imagesToDelete.includes(url),
+      );
+
+      // Delete the images from Cloudinary
+      await this.deleteImagesFromCloudinary(imagesToDelete);
     }
+
+    // Save new images to Cloudinary if provided and update the image URLs
+    if (imageFiles && imageFiles.length > 0) {
+      const newImageUrls = await this.saveImages(imageFiles);
+      updatedImageUrls = [...updatedImageUrls, ...newImageUrls];
+    }
+
+    console.log(updatedImageUrls);
 
     // Update product properties
     existingProduct.name = updateProductDto.name;
@@ -249,12 +255,7 @@ export class ProductService {
     existingProduct.new = newProduct;
     existingProduct.inStock = inStock;
     existingProduct.hot = hot;
-    if (imageUrl) {
-      existingProduct.imageUrl = imageUrl; // Assign the updated image URL to the product
-    }
-
-    // Logging the updated product
-    console.log('Updated Product:', existingProduct);
+    existingProduct.imageUrls = updatedImageUrls; // Assign updated image URLs
 
     return await this.productRepository.save(existingProduct);
   }
@@ -269,21 +270,9 @@ export class ProductService {
       throw new NotFoundException('Product not found');
     }
 
-    // Extract the public ID from the Cloudinary URL
-    const publicId = this.extractPublicIdFromImageUrl(productToDelete.imageUrl);
+    // Delete the existing images from Cloudinary
+    await this.deleteImagesFromCloudinary(productToDelete.imageUrls);
 
-    try {
-      // Delete the image from Cloudinary using its public ID
-      if (publicId) {
-        await cloudinary.uploader.destroy(publicId);
-        console.log(`Image deleted from Cloudinary. Public ID: ${publicId}`);
-      }
-    } catch (error) {
-      console.error('Error deleting image from Cloudinary:', error);
-      // Handle error if needed
-    }
-
-    // Delete the product itself
     return await this.productRepository.delete(id);
   }
 
@@ -325,47 +314,55 @@ export class ProductService {
   //   }
   // }
 
-  async saveImage(imageFile?: Express.Multer.File): Promise<string> {
+  async saveImages(imageFiles?: Express.Multer.File[]): Promise<string[]> {
     try {
-      if (!imageFile) {
-        // If no image file is provided, return null or throw an error as per your requirement
-        return null; // or throw new Error('No image file provided');
+      if (!imageFiles || imageFiles.length === 0) {
+        return [];
       }
 
-      // Create a temporary file from the buffer
-      const tempFilePath = `temp-${Date.now()}.${imageFile.originalname.split('.').pop()}`;
-      await writeFileAsync(tempFilePath, imageFile.buffer);
+      const uploadedImageUrls: string[] = [];
 
-      // Upload the temporary file to Cloudinary
-      const result = await cloudinary.uploader.upload(tempFilePath, {
-        folder: 'e-commerce-shipshop', // Optional: Specify a folder in Cloudinary to organize your images
-      });
+      // Upload each file to Cloudinary
+      for (const imageFile of imageFiles) {
+        const tempFilePath = `temp-${Date.now()}.${imageFile.originalname.split('.').pop()}`;
+        await writeFileAsync(tempFilePath, imageFile.buffer);
 
-      // Delete the temporary file
-      await unlinkAsync(tempFilePath);
+        // Upload the temporary file to Cloudinary
+        const result = await cloudinary.uploader.upload(tempFilePath, {
+          folder: 'e-commerce-shipshop', // Optional: Specify a folder in Cloudinary to organize your images
+        });
 
-      // Return the URL of the uploaded image
-      return result.secure_url;
+        // Collect the URL of the uploaded image
+        uploadedImageUrls.push(result.secure_url);
+
+        // Delete the temporary file
+        await unlinkAsync(tempFilePath);
+      }
+
+      // Return the array of uploaded image URLs
+      return uploadedImageUrls;
     } catch (error) {
-      console.error('Error saving image to Cloudinary:', error);
+      console.error('Error saving images to Cloudinary:', error);
       throw new Error('Failed to save image');
     }
   }
 
   // Method to delete image from Cloudinary
-  async deleteImageFromCloudinary(imageUrl: string): Promise<void> {
+  async deleteImagesFromCloudinary(imageUrls: string[]): Promise<void> {
     try {
-      // Extract the public ID of the image from the Cloudinary URL
-      const publicId = this.extractPublicIdFromImageUrl(imageUrl);
+      for (const imageUrl of imageUrls) {
+        // Extract the public ID of the image from the Cloudinary URL
+        const publicId = this.extractPublicIdFromImageUrl(imageUrl);
 
-      if (publicId) {
-        // Delete the image from Cloudinary using its public ID
-        await cloudinary.uploader.destroy(publicId);
-        console.log(`Image deleted from Cloudinary. Public ID: ${publicId}`);
+        if (publicId) {
+          // Delete the image from Cloudinary using its public ID
+          await cloudinary.uploader.destroy(publicId);
+          console.log(`Image deleted from Cloudinary. Public ID: ${publicId}`);
+        }
       }
     } catch (error) {
-      console.error('Error deleting image from Cloudinary:', error);
-      throw new Error('Failed to delete image from Cloudinary');
+      console.error('Error deleting images from Cloudinary:', error);
+      throw new Error('Failed to delete images from Cloudinary');
     }
   }
 
